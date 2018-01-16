@@ -1,0 +1,204 @@
+---
+title: "Practical Machine Learning - Prediction Assignment Writeup"
+author: "Steffen W."
+date: "14 Januar 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Course Project - Background and Goals
+
+Recall the instructions and background from the course project.
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and to predict the manner in which they did the exercise. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: <http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset).
+
+
+#### Technical details
+This is the `classe` variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+The training data for this project is provided here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
+
+The test data is available here:
+<https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+The data for this project comes from this source: 
+<http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har>
+
+Further information is provided here including the article
+
+**Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6**
+
+
+### Setup
+
+First we setup the working directory, the libraries which will be used throughout the remaining and the seed.
+
+```{r, echo = T, results = "hide", warning=FALSE, message=FALSE, error=FALSE}
+setwd("~/Development/Data/Coursera/PracticalMachineLearning")
+library(dplyr)
+library(caret)
+library(corrplot)
+library(rattle)
+library(tidyr)
+set.seed(123456789)
+```
+
+Next we load the underlying data for the project
+```{r, echo = T}
+url.trainging = url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+url.testing   = url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+training.data = read.csv(url.trainging, sep = ",", header = T)
+testing.data  = read.csv(url.testing, sep = ",", header = T)
+```
+We will do the analysis, the model training on the `training.data` whereas the `testing.data` contains the 20 records on which we will apply the final model and prediction.
+
+### Preprocessing - Understand and prepare the data
+
+#### Get to know the data (level 1)
+A first overview is provided by `str(training.data)`, `View(training.data)`(both too large for printing) and
+```{r, echo = T}
+dim(training.data)
+```
+The data has 160 observables of which the last is `classe`.
+Note that many columns are of type `Factor`, consist of many `NA` records, seem to provide few variability or are used to identify the data records.
+
+#### Prepare and clean the data
+We proceed by partitioning the `training.data` into a larger training and smaller testing set
+```{r, echo = T}
+idx.training = createDataPartition(training.data$classe, p = 2/3, list = F)
+training.set = training.data[idx.training,]
+testing.set  = training.data[-idx.training,]
+```
+
+In order to clean the data we iteratively exclude columns which are unlikely to contribute significant value to the model fit and prediction.
+First let us remove the colums `1:5` which seem to represent ids or (seeminlgy unimportant) timestamps for the data 
+```{r, echo = T}
+training.set.cleaned = training.set[, -c(1:5)]
+```
+Second we use the `nearZeroVar` to exclude the columns which provide few variability
+```{r, echto = T}
+idx.nzv = nearZeroVar(training.set.cleaned, saveMetrics=T)
+training.set.cleaned = training.set.cleaned[, !idx.nzv$nzv]
+```
+Finally let us remove the columns which consist of more than `30%` of `NA` values.
+```{r, echo = T}
+contains70PctValid = 
+  function(col){
+    col.valid = which(!is.na(col)) %>% length()
+    return(col.valid >= 0.7 * length(col))
+  }
+idx.valid = sapply(training.set.cleaned, function(col) contains70PctValid(col) )
+training.set.cleaned = training.set.cleaned[,idx.valid]
+```
+Note that we do not make use of `knnImpute` for the remaining `NA` values as we do not want to modify the data.
+We therefore end up with a trainig set of `54` observables
+```{r, echo = T}
+dim(training.set.cleaned)
+```
+for which the last one `classe` and all other columns are of type numeric or integer - see `str(training.set.cleaned)`.
+
+Finally we apply the same procedure to the `testing.set` (but omit the prints).
+
+#### Understand the data (level 2)
+
+The training set has still `53` observables which might be significant for the prediction.
+The PCA provides the information of at least `27` significant components
+```{r, echo = T}
+preProcess(training.set.cleaned, method="pca")
+```
+which is supported also by the correlation plot showing most of the observables to be uncorrelated to each other. 
+Hence we can not perform a reduction to a few (say less than 10) significant factors.
+```{r, echo = T, E, out.width = "100%"}
+corMatrix = cor(training.set.cleaned[, -54])
+corrplot(corMatrix, 
+         type="upper", order="hclust", tl.col="black", tl.srt=45, tl.cex = 0.5, 
+         sig.level = 0.01, insig = "blank")
+```
+
+Further plots are not easy to provide due to the large number of potentially significant components. 
+Finally to visualize this we at least provide a feature plot of the first `5` observables vs. the `classe` - it  also shows a non-trivial relation between each feature and `classe`.
+```{r, echo = T, out.width = "100%"}
+featurePlot(x = training.set.cleaned[,c(1:5)], 
+            y = training.set.cleaned$classe, 
+            plot = "pairs")
+```
+
+### Models and Predictions
+
+The outcome `classe` is of categorical type with 5 states, hence we are dealing with a classification problem. 
+We therefore take the following methods which we learned in class into consideration
+
+- Decision Trees
+
+- Random Forests
+
+- Boosting (with trees)
+
+#### Decision Tree
+
+##### Model Fit
+The decision tree model is trained by the method `rpart` and visualized by `rattle`'s `fancyRpartPlot` below. 
+```{r, echo = T}
+training.model.decisiontree = train(classe ~ ., method="rpart", data = training.set.cleaned)
+print(training.model.decisiontree$finalModel)
+fancyRpartPlot(training.model.decisiontree$finalModel)
+```
+
+##### Cross Validation
+The model is applied to the testing set, the outcomes are predicted and the quality of the prediction is evaluated with the confusion matrix.
+```{r, echo = T}
+testing.model.dectree.prediction = predict(training.model.decisiontree, newdata = testing.set)
+confusionMatrix(testing.set$classe, testing.model.dectree.prediction)
+```
+
+##### Conclusion
+The results - **accuracy of roughly `50%`** - are not very promising, not to say useless, and we reject the model for the predicition.
+
+#### Random Forest
+
+##### Model Fit
+The random forest model is trained by the method `rf` (without tuning parameters `proxy = T` since the computation took too long) and the most important components are presented below.
+```{r, echo = T}
+training.model.randomforest = train(classe ~ ., method="rf", trControl = trainControl(method = "cv", number = 4), data=training.set.cleaned)
+# training.model.randomforest = train(classe ~ ., method="rf", proxy = T, data=training.set.cleaned)
+print(training.model.randomforest$finalModel)
+varImp(training.model.randomforest)
+```
+
+##### Cross Validation
+The model is applied to the testing set, the outcomes are predicted and the quality of the prediction is evaluated with the confusion matrix.
+```{r, echo = T}
+testing.model.randomforest.prediction = predict(training.model.randomforest, newdata = testing.set)
+confusionMatrix(testing.set$classe, testing.model.randomforest.prediction)
+```
+
+##### Conclusion
+The results - **accuracy of roughly `99%`** - are very promising and we accept the model for the final prediction. The high accuracy might even lead to the conclusion of over fitting.
+
+
+#### Boosting
+
+We chose to not document the results in order to keep it short - the results were similiar (but slightly worse) to the randon forest method. 
+
+### Final prediction - out of sample
+
+#### Predictions
+In this final section we apply the random forest model in the final prediction to the 20 records of the `testing.data` and predict the outcomes for `classe` as follows.
+```{r, echo = T}
+predict(training.model.randomforest, newdata=testing.data)
+```
+The predictions turned out to be all correct.
+
+#### Final Conclusion
+
+We performed the whole process of getting the data, preprocessing the data, fitting the model and predicting  the outcomes as well as interpreting the results, as we learned it in the class of `Practical Machine Learning`. 
+The goal was to predict categorical outcomes for which we analysed the data and some of the relevant methods we learned in class.
+Eventually we chose the random forest model for the final prediction which we almost suspected to be over fitted due to the high accuracy on the test set. However the final predictions turned out to be all correct.
+
+
+
