@@ -76,9 +76,9 @@ testing.set  = training.data[-idx.training,]
 ```
 
 In order to clean the data we iteratively exclude columns which are unlikely to contribute significant value to the model fit and prediction.
-First let us remove the colums `1:5` which seem to represent ids or (seeminlgy unimportant) timestamps for the data 
+First let us remove the colums `1:6` which seem to represent ids, user names, or (seeminlgy unimportant) timestamps for the data 
 ```{r, echo = T}
-training.set.cleaned = training.set[, -c(1:5)]
+training.set.cleaned = training.set[, -c(1:7)]
 ```
 Second we use the `nearZeroVar` to exclude the columns which provide few variability
 ```{r, echto = T}
@@ -96,17 +96,17 @@ idx.valid = sapply(training.set.cleaned, function(col) contains70PctValid(col) )
 training.set.cleaned = training.set.cleaned[,idx.valid]
 ```
 Note that we do not make use of `knnImpute` for the remaining `NA` values as we do not want to modify the data.
-We therefore end up with a trainig set of `54` observables
+We therefore end up with a trainig set of `53` observables
 ```{r, echo = T}
 dim(training.set.cleaned)
 ```
-for which the last one `classe` and all other columns are of type numeric or integer - see `str(training.set.cleaned)`.
+for which the last one is `classe` and all other columns are of type numeric or integer - see `str(training.set.cleaned)`.
 
 Finally we apply the same procedure to the `testing.set` (but omit the prints).
 
 #### Understand the data (level 2)
 
-The training set has still `53` observables which might be significant for the prediction.
+The training set has still `52` observables which might be significant for the prediction.
 The PCA provides the information of at least `27` significant components
 ```{r, echo = T}
 preProcess(training.set.cleaned, method="pca")
@@ -114,14 +114,14 @@ preProcess(training.set.cleaned, method="pca")
 which is supported also by the correlation plot showing most of the observables to be uncorrelated to each other. 
 Hence we can not perform a reduction to a few (say less than 10) significant factors.
 ```{r, echo = T, E, out.width = "100%"}
-corMatrix = cor(training.set.cleaned[, -54])
+corMatrix = cor(training.set.cleaned[, -53])
 corrplot(corMatrix, 
          type="upper", order="hclust", tl.col="black", tl.srt=45, tl.cex = 0.5, 
          sig.level = 0.01, insig = "blank")
 ```
 
 Further plots are not easy to provide due to the large number of potentially significant components. 
-Finally to visualize this we at least provide a feature plot of the first `5` observables vs. the `classe` - it  also shows a non-trivial relation between each feature and `classe`.
+Finally to visualize the complexity of the data we at least provide a feature plot of the first `5` observables vs. the `classe` - it  also shows a non-trivial relation between each feature and `classe`.
 ```{r, echo = T, out.width = "100%"}
 featurePlot(x = training.set.cleaned[,c(1:5)], 
             y = training.set.cleaned$classe, 
@@ -131,7 +131,8 @@ featurePlot(x = training.set.cleaned[,c(1:5)],
 ### Models and Predictions
 
 The outcome `classe` is of categorical type with 5 states, hence we are dealing with a classification problem. 
-We therefore take the following methods which we learned in class into consideration
+We also saw that the complexity of the data is distributed among many components.
+Threfore we take the following methods which we learned in class into consideration
 
 - Decision Trees
 
